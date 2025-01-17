@@ -1,0 +1,64 @@
+FROM alpine:3.17 AS builder
+
+# This throws error
+# FROM --platform=linux/amd64 alpine:3.17 AS worker-builder
+
+# Update repository mirror and install CA certificates
+RUN echo "http://mirror.yandex.ru/mirrors/alpine/v3.17/main" > /etc/apk/repositories && \
+		echo "http://mirror.yandex.ru/mirrors/alpine/v3.17/community" >> /etc/apk/repositories && \
+		apk update && \
+		apk add --no-cache ca-certificates && \
+		update-ca-certificates
+
+# Install dependencies required for building tools
+RUN apk add --no-cache \
+		bash \
+		git \
+		curl \
+		wget \
+		libpcap-dev \
+		gcc \
+		g++ \
+		make \
+		libc-dev && \
+		wget https://go.dev/dl/go1.23.4.linux-amd64.tar.gz && \
+		tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz && \
+		rm go1.23.4.linux-amd64.tar.gz
+
+
+# Set environment variables
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV PATH=$PATH:/usr/local/go/bin
+
+# Set the working directory
+WORKDIR /app
+
+# Copy go.mod and go.sum files
+COPY go.mod go.sum ./
+
+# Download and cache dependencies
+RUN go mod download
+
+# Copy the source code
+COPY . .
+
+# Build the application
+RUN go build -o ping-redis .
+
+# Use a minimal image for running the application
+FROM alpine:latest
+
+# # Install certificates for HTTPS connections (optional, for TLS-enabled Redis)
+# RUN apk add --no-cache ca-certificates
+
+# Set the working directory
+WORKDIR /root/
+
+# Copy the binary from the builder stage
+COPY --from=builder /app/ping-redis .
+
+# Expose the default port (optional, if you plan to make this an API server later)
+EXPOSE 8080
+
+# Run the application
+CMD ["./ping-redis"]
